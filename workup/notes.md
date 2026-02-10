@@ -22,6 +22,15 @@ alarms
 https://creativetechguy.com/utilities/clock#seconds
 
 
+
+some times problem with port 61616  being allocated from ephemeral range
+use
+```
+net stop winnat
+net start winnat
+```
+
+
 Events 
 Alarms 
 SNMP 
@@ -78,4 +87,7 @@ o	docker-compose up -d: Starts all of the services defined in a Docker Compose f
 -	Raluca, Luis, Anbarasu, Jerome – please identify the resources from your teams who have the requested profile to participate to this training (1 Training, 3 R&D, 3 Support, 3 Delivery).
 
 Thanks for informing the participants to pre-book their agenda.
+
+
+https://github.com/labmonkeys-space/app-container/tree/main/net-snmp  Ronnys NetSnmp
 

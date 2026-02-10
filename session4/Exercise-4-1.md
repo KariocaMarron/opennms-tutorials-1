@@ -1,53 +1,315 @@
-# Exercise 4-1 
-
 [Main Menu](../README.md) | [Session 4](../session4/README.md) | [Exercise-4-1](../session4/Exercise-4-1.md)
 
-In this exercise we will translate received traps into a set of modified traps using the [event translator](https://docs.opennms.com/horizon/33/operation/deep-dive/events/event-translator.html).
+# Exercise 4-1 
 
-## Senario
+OpenNMS uses [Postgresql](https://www.postgresql.org/) as the underlying database for storing it's dynamic configurations and for processing alarms and events.
 
-Imagine that multiple cameras from the examples in [Session 3](../session3/README.md) are controlled from a single `camera-controller`. 
-The cameras themselves are not directly manageable from OpenNMS but the `camera-controller` monitors the cameras and will send traps to OpenNMS if it detects any problems with any of the cameras. 
+Most access to the database in OpenNMS is performed through the java persistence layer which is based on the [Java Persistence API (JPA)](https://en.wikipedia.org/wiki/Jakarta_Persistence) implemented in [Hibernate](https://en.wikipedia.org/wiki/Hibernate_(framework)).
+The main APIs, alarm and correlation processes such as Drools directly interact with this persistence layer.
 
-The operator wishes to show the status of all the cameras on a map, so they each need to be represented as unique OpenNMS nodes which may or may not have alarms associated with them.
-However, instead of each camera sending traps directly to OpenNMS with a unique IP address associated with each camera, the `camera-controller` sends all the traps from its own IP address on behalf of the cameras it manages.
-If all the traps come from the same IP address, how will OpenNMS know which camera has an alarm?
+However it remains useful in certain circumstances for user processes to be able to modify the database directly using SQL queries. 
 
-The answer in this case is to use the [event translator](https://docs.opennms.com/horizon/33/operation/deep-dive/events/event-translator.html)
+Two configurable daemons can use SQL queries in order to manipulate the tables during event processing. 
+* The [Event Translator](https://docs.opennms.com/horizon/33/operation/deep-dive/events/event-translator.html) can create a new event based on an incoming event enriched with data from the database.
+* [Vacuumd](https://docs.opennms.com/horizon/33/reference/daemons/daemon-config-files/vacuumd.html) is a daemon which can be triggered by specific events or by a chron schedule to process database tables. 
+In earlier versions of OpenNMS `Vacuumd` was used to process events into alarms but that functionality is now performed by the drools rules integration.
+Although Vacuumd is mostly deprecated, it still has an important role in scheduling the removal of very old event records from the database. 
+The configuration for Vaccumd is held in [/etc/vacuumd-configuration.xml](../pristine-opennms-config-files/etc-pristine/vacuumd-configuration.xml)
 
-## Setup
+We will not look further at `Vacuumd` in this training but will instead concentrate on the `Event Translator`.
 
-The cameras and camera controllers are defined in the [camera-locations.xml requisition](../session4/minimal-minion-activemq/container-fs/horizon/opt/opennms-overlay/etc/imports/camera-locations.xml).
+Firstly, however, we will begin by examining the OpenNMS database.
 
-You should import this requisition to define the cameras and `camera-controller` when you start OpenNMS.
-The cameras are named after the fashion; camera_001, camera_002 etc. 
-Each camera also has an asset record defining the latitude and longitude of its location which creates the following map;
+## Viewing the OpenNMS database
 
-![alt text](../session4/images/chubb-cameras.png "Figure chubb-cameras.png")
+You should use the docker compose project under the `EventTranslator` folder for this exercise
 
-The camera nodes are themselves not monitored by OpenNMS and do not have any interface definitions, so they are in effect `dummy nodes` which can have alarms associated with them. 
+[/session4/EventTranslator/minimal-minion-activemq](../session4/EventTranslator/minimal-minion-activemq).
 
-Each camera has a unique `cameraIdentifier` to identify it in the `camera-controller` and on OpenNMS.
+The [session4/EventTranslator/minimal-minion-activemq](../session4/EventTranslator/minimal-minion-activemq) docker compose project includes a docker image of the [pgAdmin4](https://www.pgadmin.org/) Postgresql web maintenance tool.
+* https://github.com/pgadmin-org/pgadmin4
+* https://hub.docker.com/r/dpage/pgadmin4/
 
-The traps sent from the `camera-controller` follow exactly the same pattern as the traps in the previous exercise but they all have an extra string varbind which contains the cameraIdentifier.
+To examine the database, you will need to start the project and wait for OpenNMS to initialise.
+(If the database does not exist or has been deleted, OpenNMS will recreate the `opennms` database in Postgresql before starting up).
 
-Example traps are provided in [CAMERA-CONTROLLER Trap Examples](../session4/TrapExamplesCAMERA-CONTROLLER.md)
+```
+cd EventTranslator/minimal-minion-activemq
+docker compose up -d
+```
 
-These traps match the event configuration here [etc/events/CAMERA-CONTROLLER-MIB.events.xml](../session4/minimal-minion-activemq/container-fs/horizon/opt/opennms-overlay/etc/events/CAMERA-CONTROLLER-MIB.events.xml) 
+Once the database is created, you can view it on the `pgAdmin4` database viewer at http://localhost:8888/
 
-You need to design an event translator configuration which will translate the events from these new traps into the old events defined in [Exercise 3.1](../session3/Exercise-3-1.md) with the correct nodeid corresponding to the `cameraIdentifier` in the traps.
+* username: `user-name@domain-name.com`
+* password: `minad1234`
 
-A starting point is provided here [etc/translator-configuration.xml](../session4/minimal-minion-activemq/container-fs/horizon/opt/opennms-overlay/etc/translator-configuration.xml) 
-This is based upon the standard translations included with OpenNMS. 
+Once logged into `pgAdmin4`, select the `servers` tree entry.
 
-We need to translate each of the incoming events so that a new event is created with the correct node id. 
-To do this, the event translator must do a lookup in the database to find the correct node id based on it's node label matching the cameraId in the trap.
+You will be asked to enter the password for the user `postgres` to connect to the server `database`
+* user: `postgres`
+* password:  `postgres`
 
-You will see in the file there is already a configuration `Improved LinkDown/LinkUp events`  which looks up nodes using sql. 
-You need to do a similar event lookup for each of the events defined in [etc/events/CAMERA-CONTROLLER-MIB.events.xml](../session4/minimal-minion-activemq/container-fs/horizon/opt/opennms-overlay/etc/events/CAMERA-CONTROLLER-MIB.events.xml) 
+Then under `databases` you will see the database `opennms` if it has been created.
 
-A starting point is provided at the end of the file `Translations FOR CAMERA CONTROLLER EVENTS`. 
-Modify this to do a database lookup.
+Under `opennms` you will see an entry `schemas` and under that you will see `tables` where all 115 or so OpenNMS tables are listed.
 
-You will find the answer here (but try the exercise first).
-[Exercise-4-1 Answer](../session4/Exercise4-1-answer.md)
+In the top bar of `pgAdmin4`, under `tools` you can select the `Query Tool` which will allow you to enter queries.
+
+The following diagram shows the query tool open.
+
+![alt text](../session4/images/pgadmin-1.png "Figure pgadmin-1.png")
+
+Try entering a simple SQL command to see all the nodes in the database.
+
+```
+select * from node;
+```
+
+or to see only the node named `localhost`
+
+```
+select * from node where nodelabel = 'localhost';
+```
+
+Have a look at the events table
+
+```
+select * from events;
+```
+
+and the alarms table
+
+```
+select * from alarms;
+```
+Note that in OpenNMS, most of the model objects (Entities) are backed by a database table (although some objects are created from table joins).
+
+Most model class names begin with `Onms...` e.g. `OnmsAlarm.java`.
+
+The `@Table` annotation in each entity class will point to the database table backing the object.
+For instance see [OnmsAlarm.java](https://github.com/OpenNMS/opennms/blob/opennms-33.1.6-1/opennms-model/src/main/java/org/opennms/netmgt/model/OnmsAlarm.java)
+
+```
+@Entity
+@Table(name="alarms")
+public class OnmsAlarm implements Acknowledgeable, Serializable {
+...
+}
+
+```
+You can see the JPA definitions of all of the java objects in the OpenNMS model classes folder on github.
+* [ https://github.com/OpenNMS/opennms/tree/opennms-33.1.6-1/opennms-model/src/main/java/org/opennms/netmgt/model]( https://github.com/OpenNMS/opennms/tree/opennms-33.1.6-1/opennms-model/src/main/java/org/opennms/netmgt/model)
+
+You can browse through the other entities and matching tables but for our purposes, the most important tables are `events`, `alarms` and  `node`
+
+|Model Class | database table |
+|------------|----------------|
+| [OnmsAlarm.java](https://github.com/OpenNMS/opennms/blob/opennms-33.1.6-1/opennms-model/src/main/java/org/opennms/netmgt/model/OnmsAlarm.java) | alarms |
+| [OnmsEvent.java](https://github.com/OpenNMS/opennms/blob/opennms-33.1.6-1/opennms-model/src/main/java/org/opennms/netmgt/model/OnmsEvent.java) | events |
+| [OnmsNode.java](https://github.com/OpenNMS/opennms/blob/opennms-33.1.6-1/opennms-model/src/main/java/org/opennms/netmgt/model/OnmsNode.java)   | node  |
+
+It is worth spending a little time browsing the entity objects and understanding how they relate to the database.
+
+## Event Translator ( example with linkUp linkDown events )
+
+Often, not all of the information required to provide useful reporting is in a given trap and so the event presented to the user needs enriched from additional data sources.
+The [Event Translator](https://docs.opennms.com/horizon/33/operation/deep-dive/events/event-translator.html) is a tool that can create a new event from an existing event which is enriched with data from the database.
+
+The unmodified [translator-configuration.xml](../pristine-opennms-config-files/etc-pristine/translator-configuration.xml) runs by default in OpenNMS.
+
+We will consider the `Improved LinkDown/LinkUp events` translator definition which improves the SNMP link events.
+
+By themselves SNMP link traps only tell us the `ifIndex` of the interface which has gone down.
+The name and type of this interface is not supplied in the trap varbinds.
+However the name of the interface (`eth0` `eth1` etc) is very useful to the user.
+
+OpenNMS regularly scans the `ifTable` of a device and will already have the additional information for a given `ifIndex` so we need to extract the `ifIndex` from the trap and look up the additional information in the interface table before adding it into the event which the user will see.
+
+You will see from the following mib browser walk if the trap has given us the `ifIndex oid`, we can find the other information from the SNMP interface table previously read by OpenNMS. 
+
+![alt text](../session4/images/ifindex.png "Figure ifindex.png")
+
+The event configuration which turns an SNMP `LinkDown` trap into an event is `ei.opennms.org/generic/traps/SNMP_Link_Down`
+
+```
+   <event>
+      <mask>
+         <maskelement>
+            <mename>generic</mename>
+            <mevalue>2</mevalue>
+         </maskelement>
+      </mask>
+      <uei>uei.opennms.org/generic/traps/SNMP_Link_Down</uei>
+      <event-label>OpenNMS-defined trap event: SNMP_Link_Down</event-label>
+      <descr>&lt;p>A linkDown trap signifies that the sending protocol entity recognizes a failure in one of the
+            communication link represented in the agent's
+            configuration. The data passed with the event are 1) The name and value of the ifIndex instance for the
+            affected interface. The name of the
+            interface can be retrieved via an snmpget of .1.3.6.1.2.1.2.2.1.2.INST, where INST is the instance returned
+            with the trap.&lt;/p></descr>
+      <logmsg dest="donotpersist">Agent Interface Down (linkDown Trap)
+        </logmsg>
+      <severity>Minor</severity>
+      <!-- Removed this alarm in preference to the translated version -->
+      <!-- <alarm-data reduction-key="%uei%:%dpname%:%nodeid%:%interface%" alarm-type="1" /> -->
+   </event>
+```
+This generates an event from the SNMP link down trap with the uei `uei.opennms.org/generic/traps/SNMP_Link_Down`. 
+The Event Translator should listen for this event.
+
+Note that `<logmsg dest="donotpersist">` means that this event is never persisted to the database so we should only ever see the new event from the translator and not this original one.
+
+We want to translate this into a more useful event definition `uei.opennms.org/translator/traps/SNMP_Link_Down`.
+
+In the translated event we need to create `IfDescr`, `IfName` and `ifAlias` parameters in order to display them with the following event definition.
+
+```
+   <event>
+      <uei>uei.opennms.org/translator/traps/SNMP_Link_Down</uei>
+      <event-label>Translator Enriched LinkDown Event</event-label>
+      <descr>&lt;p>A linkDown trap signifies that the sending protocol entity recognizes a failure in one of the
+            communication link represented in the agent's configuration. &lt;/p>
+            &lt;p>Instance: %parm[#1]% &lt;/p>
+            &lt;p>IfDescr: %parm[ifDescr]% &lt;/p>
+            &lt;p>IfName: %parm[ifName]% &lt;/p>
+            &lt;p>IfAlias: %parm[ifAlias]% &lt;/p></descr>
+      <logmsg dest="logndisplay">Agent Interface Down (linkDown Trap)
+        </logmsg>
+      <severity>Minor</severity>
+       <!-- reduce alarms from traps and polls into a single alarm -->
+       <alarm-data reduction-key="uei.opennms.org/nodes/snmp/interfaceOperDown:%dpname%:%nodeid%:%parm[#1]%" alarm-type="1" auto-clean="false">
+           <update-field field-name="severity" update-on-reduction="true"/>
+       </alarm-data>
+   </event>
+
+```
+(Both these event definitions are in the file [etc/events/opennms.snmp.trap.translator.events.xml](../pristine-opennms-config-files/etc-pristine/events/opennms.snmp.trap.translator.events.xml)).
+
+All of the SNMP trap varbinds become parameters in an event and we will look at these parameters in the translator.
+
+Remember that OpenNMS event definitions only usually care about the position of a varbind, not its name. 
+But in this case the oid name of a varbind is very important as the name changes with the ifIndex.
+
+The link up and down events from devices are a bit complicated for users to interpret, particularly since the `ifIndex` of a port can move around depending on the configuration of the device. 
+
+The SNMP trap definition for a link down event will always have a varbind parameter named after the oid of the `ifIndex` of the link which has gone down.
+
+So we are looking for a parameter (varbind) with the name `.1.3.6.1.2.1.2.2.1.1.IFINDEX` where `IFINDEX` is the number of the interface that will tell us which row in the OpenNMS interface table we are looking for.
+
+The following excerpt from [translator-configuration.xml](../pristine-opennms-config-files/etc-pristine/translator-configuration.xml) shows how this event is processed.
+
+This shows how the `uei.opennms.org/generic/traps/SNMP_Link_Down` event is enriched with node data to create two new events  `uei.opennms.org/translator/traps/SNMP_Link_Down` and `uei.opennms.org/internal/topology/linkDown`.
+
+```
+  <!-- Improved LinkDown/LinkUp events.  Uses translator to add DB information to link status traps events -->
+  <translation>
+    <event-translation-spec uei="uei.opennms.org/generic/traps/SNMP_Link_Down">
+      <mappings>
+      
+        <mapping>
+          <assignment name="uei" type="field" >
+            <value type="constant" result="uei.opennms.org/internal/topology/linkDown" />
+          </assignment>
+        </mapping>
+      
+        <mapping>
+          <assignment name="uei" type="field" >
+            <value type="constant" result="uei.opennms.org/translator/traps/SNMP_Link_Down" />
+          </assignment>
+          <assignment name="ifDescr" type="parameter" default="Unknown">
+            <value type="sql" result="SELECT snmp.snmpIfDescr FROM snmpInterface snmp WHERE snmp.nodeid = ?::integer AND snmp.snmpifindex = ?::integer" >
+              <value type="field" name="nodeid" matches=".*" result="${0}" />
+              <value type="parameter" name="~^\.1\.3\.6\.1\.2\.1\.2\.2\.1\.1\.([0-9]*)$" matches=".*" result="${0}" />
+            </value>
+          </assignment>
+          <assignment name="ifName" type="parameter" default="Unknown">
+            <value type="sql" result="SELECT snmp.snmpIfName FROM snmpInterface snmp WHERE snmp.nodeid = ?::integer AND snmp.snmpifindex = ?::integer" >
+              <value type="field" name="nodeid" matches=".*" result="${0}" />
+              <value type="parameter" name="~^\.1\.3\.6\.1\.2\.1\.2\.2\.1\.1\.([0-9]*)$" matches=".*" result="${0}" />
+            </value>
+          </assignment>
+          <assignment name="ifAlias" type="parameter" default="Unknown">
+            <value type="sql" result="SELECT snmp.snmpIfAlias FROM snmpInterface snmp WHERE snmp.nodeid = ?::integer AND snmp.snmpifindex = ?::integer" >
+              <value type="field" name="nodeid" matches=".*" result="${0}" />
+              <value type="parameter" name="~^\.1\.3\.6\.1\.2\.1\.2\.2\.1\.1\.([0-9]*)$" matches=".*" result="${0}" />
+            </value>
+          </assignment>
+        </mapping>
+        
+      </mappings>
+      
+    </event-translation-spec>
+```
+We will now break this configuration down into its constituant parts.
+
+`<event-translation-spec uei="uei.opennms.org/generic/traps/SNMP_Link_Down">` specifies that this translation runs every time an event with a uei `uei.opennms.org/generic/traps/SNMP_Link_Down` occurs.
+
+The are two mappings, meaning that two new events will be created.
+
+The simplest mapping will create a duplicate of the original event including all of its parameters (varbinds) but with a new uei `uei.opennms.org/internal/topology/linkDown`
+
+```
+        <mapping>
+          <assignment name="uei" type="field" >
+            <value type="constant" result="uei.opennms.org/internal/topology/linkDown" />
+          </assignment>
+        </mapping>
+```
+
+The more complicated mapping will create a new  event `uei.opennms.org/translator/traps/SNMP_Link_Down` with all of its varbinds copied.
+This event needs to have three extra parameters `ifDiscr`,`ifName` and `ifAlias`, which are not available in the original trap but which may be available in in the `snmpInterfaces` table of the OpenNMS database.
+
+The `snmpInterfaces` table is populated for a node if it has an SNMP agent which has successfully been read by OpenNMS.
+This table can contain useful additional information which is not in the original trap to identify the description, name and alias of the interface.
+The new event we create will also have these fields populated. 
+
+In this code snippet, we can see that we are adding a new parameter called `ifDescr`.
+
+```
+          <assignment name="ifDescr" type="parameter" default="Unknown">
+            <value type="sql" result="SELECT snmp.snmpIfDescr FROM snmpInterface snmp WHERE snmp.nodeid = ?::integer AND snmp.snmpifindex = ?::integer" >
+              <value type="field" name="nodeid" matches=".*" result="${0}" />
+              <value type="parameter" name="~^\.1\.3\.6\.1\.2\.1\.2\.2\.1\.1\.([0-9]*)$" matches=".*" result="${0}" />
+            </value>
+          </assignment>
+```
+
+If the sql statement returns no result, the `ifDescr` parameter will be given the default value `Unknown`.
+
+The SQL is actually a [JDBC](https://en.wikipedia.org/wiki/Java_Database_Connectivity) query where each question mark `?`  is substituted with a value.
+
+(Note for developers - the Event Translator uses JDBC SQL queries directly with the database and bypasses Hibernate and the internal OpenNMS DAOs. 
+It does not use the Hibernate or JPA query language).
+
+The first value is the `nodeid` of the node creating the event. 
+The `matches=".*"` allows us to use a regular expression (sometimes referred to as a `regex`) to only match certain values of nodeid.
+In this case the regex `.*` means that all values of nodeid are matched so we are looking for the interface on this node.
+
+The second value will be the contents of the parameter (varbind) which gives the `ifIndex` of the link that has gone down
+
+In this case we are using a regular expression to extract the last number characters from the `.1.3.6.1.2.1.2.2.1.1.nn` oid. 
+The last number `nn` will be the `ifIndex` we can use to look up the OpenNMS `snmpInterface` table.
+
+> **Regular Expressions (regex)**
+> Regular expressions are a sequence of characters that forms a search pattern to find one or more sequences of characters in a text string
+> It is worth getting to understand how regular expressions work because they are used widely in OpenNMS.
+> You can find a simple tutorial here [W3 Schools Java Regex](https://www.w3schools.com/java/java_regex.asp).
+>
+> For this example we can test our regular expression against an oid using [https://regex101.com/](https://regex101.com/)
+>
+> The search string from above is `~^\.1\.3\.6\.1\.2\.1\.2\.2\.1\.1\.([0-9]*)$` but the initial `~` just tells OpenNMS this is a regular expression, so we omit in in the test.
+> Use ifIndex oid such as `.1.3.6.1.2.1.2.2.1.1.20` and we should find the match group 1 finds the ifIndex `20`
+>
+> ![alt text](../session4/images/regex101-1.png "Figure regex101-1.png")
+>
+
+Armed with the `nodeid` and interface `ifIndex`, we can use the sql query to look up the interface in the `snmpInterface` table and extract the `snmpIfdescr` i.e. the interface descriptor field. 
+
+A similar assignment is repeated for all 3 values we want to include in the new event.
+
+If this appears complicated, don't worry, it is!, but it shows us the power of the Event Translator to usefully enhance the data in events and alarms.
+
+In most cases we don't need to use such complex configurations and the configuration for the next use case will be much simpler.
+
+Go to [Exercise-4-2](../session4/Exercise-4-2.md) which walks through the process of creating an example event translator for a real use case.
+

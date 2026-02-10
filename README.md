@@ -4,8 +4,8 @@ Git Repository of OpenNMS tutorial examples
 
 This is tutorial is version 2025-Horizon33 targeting OpenNMS Horizon 33 / Meridian 2025.
 
-**Note** The videos with eash session are from a previous version of this tutorial. 
-  They are still mostly aligned with the content but new videos will be created for this version once it fully updated.
+**Note** Some of the videos with each session are from a previous version of this tutorial. 
+  They are still mostly aligned with the content but new videos will be created for this version as it is fully updated.
 
 For previous versions of this tutorial see [Version History](../main/versionHistory.md)
 
@@ -20,17 +20,17 @@ Enjoy &#128512;
 ## Contents
 [session1](../main/session1/) Introduction to OpenNMS
 
-[session2](../main/session2/) Introduction to Provisioning OpenNMS
+[session2](../main/session2/) OpenNMS Configuration, Provisioning, Service and Web Site Monitoring
 
-[session3](../main/session3/) Introduction to Alarms and Events
+[session3](../main/session3/) Introduction to Events, Alarms and Traps
 
-[session4](../main/session4/) Database Event and Alarm Enrichment
+[session4](../main/session4/) Database Event and Alarm Enrichment with the Event Translator and Jboss Rules (Drools)
 
-[session5](../main/session5/) Performance Data Collection 1
+[session5](../main/session5/) Performance Data Collection using SNMP
 
-[session6](../main/session6/) Performance Data Collection 2
+[session6](../main/session6/) Full Worked Example, Summary and Wrap Up
 
-[session7](../main/session7/) Additional Topics and wrap up
+[Extra Examples](../main/extraExamples/) Additional Examples in support of the tutorials
 
 [myPracticeCourseWork](../main/myPracticeCourseWork) This is where you should create and save your own practice projects.
 
@@ -41,18 +41,29 @@ Before doing anything else you will need to follow these getting started instruc
 
 ## Prerequisites
 
-All of these examples have been tried on Docker Desktop installed on Windows 11.
-
-They should also work on Docker installed in linux  (e.g. Ubuntu 22 running in VirtualBox).
+Please see the [Prerequisites Video](https://www.youtube.com/watch?v=M-FuNBkso4M) to help you get started.
 
 In order to complete these exercises you will need docker and docker-compose for the containerised exercises. 
 The easiest way to get these packages is to install [docker-desktop](https://www.docker.com/products/docker-desktop/) which is available for Windows, Mac or Linux machines. 
 
-You will also need Java Open JDK (minimum version 17), An IDE (Eclipse or Intelij), Maven and git installed on your machine. 
+All of these examples have been tried on [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed on Windows 11.
+They should also work on Docker installed in linux  (e.g. Ubuntu 22 running in VirtualBox).
+
+---
+**NOTE**
+
+When running the examples in [docker directly on Windows System for Linux (WSL)](https://daniel.es/blog/how-to-install-docker-in-wsl-without-docker-desktop/) rather than on  [Docker Desktop](https://www.docker.com/products/docker-desktop/), some problems have been reported when using mibbrowser to snmp walk or send snmp traps to docker containers from the host PC. 
+If this is the case, you can still generate traps or do snmp walks using the Netsnmp methods described in the tutorials.
+
+---
+
+The following software is also needed:
 
 [Git for windows](https://git-scm.com/download/win)
 
-[Docker Desktop](https://www.docker.com/products/docker-desktop/)
+[Ireasoning Mib Browser](https://www.ireasoning.com/mibbrowser.shtml)
+
+For certain exercises you may also need Java Open JDK (minimum version 17), An IDE (such as Eclipse, Intelij or  VS-code. I use Eclipse) and Mave installed on your machine. 
 
 [Eclipse for Enterprise Java developers](https://www.eclipse.org/downloads/packages/release/2023-12/r/eclipse-ide-enterprise-java-and-web-developers)
 

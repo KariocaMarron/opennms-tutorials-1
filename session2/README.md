@@ -1,6 +1,6 @@
-# Session 2 OpenNMS Configuration
-
 [Main Menu](../README.md) | [Session 2](../session2/README.md)
+
+# Session 2 OpenNMS Configuration, Provisioning, Service and Web Site Monitoring
 
 ## Contents
 1. OpenNMS Configuration Overview
@@ -10,8 +10,10 @@
 * basic events alarms and traps
 * parsing a mib and creating an event configuration
 
-[Session 2 Video](https://youtu.be/7PUvTShOOkI) (unfortunately shortened due to illness)
+## Videos
+[OpenNMS Tutorial Session 2 Exercise 1](https://youtu.be/XwcCRQ2W5fU)
 
+OpenNMS Tutorial Session 2 Exercise 2 - TBD
 
 ## OpenNMS Configuration Overview
 
@@ -48,7 +50,7 @@ git tag -a v1.0 -m 'Initial base configuration of OpenNMS 33.0.6'
 After this, you can commit, tag and annotate any further changes you make.
 
 In containerised installs, you should version control the configurations injected into the container.
-You will need to make sure that the files you are overlaying are baselined against the version of OpeNNMS in the selected container otherwise the system may not start.
+You will need to make sure that the files you are overlaying are baselined against the version of OpenNMS in the selected container otherwise the system may not start.
 We will talk about updating an installation in a later module.
 
 The `/opt/opennms/share/xsds` directory contains the XML Schema Definitions for the xml files. 
@@ -86,7 +88,7 @@ The following environment variables can be injected to the container, but if the
       OPENNMS_DBUSER: 'opennms'
       OPENNMS_DBPASS: 'opennms'
 ```
-These particular database settings set values in the file [/etc/opennms-datasources.xml](../../main/pristine-opennms-config-files/etc-pristine/opennms-datasources.xml)
+These particular database settings set values in the file [etc/opennms-datasources.xml](../../main/pristine-opennms-config-files/etc-pristine/opennms-datasources.xml)
 
 If you overlay `opennms-datasources.xml`, the environment variables will not be applied on container start.
 
@@ -103,6 +105,76 @@ Finally, you should note that any OpenNMS Plugins can be injected into an OpenNM
 We needed to cover this introduction to configuration file locations so that you understand how the examples relate to your production OpenNMS installation. 
 We will have a lot more to say about configuration as we proceed with the course.
 
+### modifying configuration files through the UI
+
+It is possible for a user to modify configuration files through the [OpenNMS UI File Editor](https://docs.opennms.com/horizon/33/reference/configuration/file-editor.html).
+To do this, navigate to `info>FileEditor`.
+
+![alt text](../session2/images/onmsFileEditor.png "Figure onmsFileEditor.png")
+
+Only users with `ROLE_FILESYSTEM_EDITOR` can access this page.
+The user permissions are set per user under `admin > Configure Users, Groups and On-Call Roles`
+
+![alt text](../session2/images/onmsFileEditorRole.png "Figure onmsFileEditorRole.png")
+
+Saved changes will be permanent in a virtual machine or bare metal install of OpenNMS but please note that in a container, these configuration changes are ephemeral and may be lost on shutdown or overridden on startup.
+
+### Editing files directly
+
+The OpenNMS containers already have the [vi editor](https://devhints.io/vim) installed and you can use this if you wish.
+
+However we can make our lives a bit simpler if we also install the [nano editor](https://www.nano-editor.org/dist/latest/nano.html) because it is easier to use.
+
+(Note you may also need to change the background colour of the powershell to black to see all of the characters when editing xml markup. Use `Powershell>properties>colors>screen background`)
+
+```
+# log into the opennms horizon container as the root user
+docker compose exec -u root horizon bash
+
+# install nano 
+root@horizon:/usr/share/opennms# microdnf -y install nano
+
+# exit as root user 
+root@horizon:/usr/share/opennms# exit
+
+```
+Now we can use nano to edit our configuration
+
+## Editing externally and copying files in or out of container
+
+You can copy files into and out of the container if you want to preserve them using the `docker compose cp` command as illustrated below.
+
+```
+# copy out of the container to the local directory `.`
+
+docker compose cp horizon:/usr/share/opennms/etc/eventconf.xml .
+
+# or copy from the local directory into the container
+
+docker compose cp ./eventconf.xml:horizon:/usr/share/opennms/etc/
+```
+
+## Reloading configurations
+
+Normally, configuration changes will be read when the system restarts however for a number of daemons, a daemon reload event can be sent which will restart the daemon in a running system. 
+
+For instance, to reload the event daemon, `eventd` you can use
+
+```
+docker compose exec horizon /usr/share/opennms/bin/send-event.pl uei.opennms.org/internal/reloadDaemonConfig -p 'daemonName Eventd' 
+```
+
+Note Perl is not installed by default in opennms containers but curl can be used instead to post an event to the system (substitute --user username:password as appropriate and note \" escape characters used in powershell)
+
+```
+docker compose exec horizon curl --user admin:admin -X POST http://localhost:8980/opennms/rest/events -H 'Content-Type: application/json' -d '{\"uei\": \"uei.opennms.org/internal/reloadDaemonConfig\", \"severity\": \"NORMAL\", \"parms\": [{\"parmName\": \"daemonName\", \"value\": \"Eventd\" }]}' 
+```
+
+Finally it is also possible to reload the `Eventd` daemon from the `Karaf Shell` using:
+```
+ssh admin@localhost -o UserKnownHostsFile=/dev/null -p 8101 reload-daemon Eventd
+```
+
 ## Provisioning Requisitions
 
 In [Session 1](../session1/README.md) we looked at how OpenNMS can scan a network and add any devices it discovers. 
@@ -115,32 +187,24 @@ Often it is also important for security to use secret SNMP community strings to 
 
 In [Exercise-2-1](../session2/Exercise-2-1.md) we will look at how device information and SNMP community strings can be provisioned in OpenNMS.
 
+## Service and Web Site Monitoring
 
-## Events, Alarms and Traps
+A primary function of OpenNMS is to detect and monitor services by regularly polling them and measuring the response time.
 
-OpenNMS is an event driven system.
-This means that the many processes running in OpenNMS primarily communicate with each other using internal OpenNMS events. 
-OpenNMS internal events correspond to changes of state within the system. 
-You will have already seen examples of these in events surrounding the discovery of new devices or the import of requisitions.
-Other examples would be node down events where OpenNMS cannot communicate with a device or threshold crossing events where the system has detected that a collected value has crossed a user set threshold.
+With it's simplest configuration, OpenNMS can and monitor detect services through attempting TCP connection to well known ports such as Mysql port 3306.
 
-Events may also be externally generated from devices using standard event protocols communicating with OpenNMS through the network; for example SNMP traps or SYSLOGS.
-Finally, it is also possible to directly inject events into OpenNMS using the ReST API.
+OpenNMS can also make HTTP queries to known urls to detect if a service is up. This can be use to good effect with services such as a load balanced WordPress service as in the next example.
 
-The majority of events are also persisted in the OpenNMS event table and may then be searched and viewed through the UI.
-However it is also possible to not persist certain events when they are only used for inter-process communication.
-
-Events tell us something happened at a certain point of time but they don't record the current state of a system.
-Often devices will repeatedly send multiple events (traps or logs) when they have detected a problem. 
-This can lead to an 'Event Storm' where it is very hard for a user to deal with so many incoming events.
-
-OpenNMS uses Alarms to correlate events into a current state which makes it much easier to see what is the current status of a device, service or network. 
-Some events may raise an alarm and some events may cause an alarm to clear. 
-Each alarm will maintain count and a list of events contributing to the alarm state. 
+To understand this further, have a try at the [Wordpress Service Monitoring Exercise-2-2](../session2/Exercise-2-2-service-monitoring1.md)
 
 
-In [Exercise-2-2](../session2/Exercise-2-2.md) we will cover some simple examples to inject traps into OpenNMS.
+The Business Service Monitoring feature of OpenNMS can combine discrete service monitoring actions to build up a service graph which indicates the business impact of a service failure. 
 
-In [Exercise-2-3](../session2/Exercise-2-3.md) we will cover some simple examples to help explain how OpennNMS traps and alarms are configured.
+Try the [Business Service Monitoring Exercise-2-3](../session2/Exercise2-3-business-service-monitoring.md) exercise.
 
-In the next [Session 3](../session3/README.md) we will consolidate our learning with a more complex example which imports events from an SNMP MIB.
+
+## Summary
+
+In this session we have looked at provisioning OpenNMS through discovering a network, provisioning through requisitions and basic service monitoring.
+
+In the next [Session 3](../session3/README.md) we will begin looking at SNMP Traps, Events and Alarms.

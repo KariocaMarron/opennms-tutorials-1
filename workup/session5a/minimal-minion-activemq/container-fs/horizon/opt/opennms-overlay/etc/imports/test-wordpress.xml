@@ -22,8 +22,9 @@
       </interface>
    </node>
    <node foreign-id="wordpress3" node-label="wordpress3">
-      <interface ip-addr="172.20.0.83" status="1" snmp-primary="N" />
-      <monitored-service service-name="ICMP" />
+      <interface ip-addr="172.20.0.83" status="1" snmp-primary="N">
+          <monitored-service service-name="ICMP" />
+      </interface>
    </node>
    <node location="Default" foreign-id="netsnmp_1_1" node-label="netsnmp_1_1">
       <interface ip-addr="172.20.0.101" status="1" snmp-primary="P">
